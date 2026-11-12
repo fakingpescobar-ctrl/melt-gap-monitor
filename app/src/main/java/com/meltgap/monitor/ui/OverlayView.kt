@@ -415,7 +415,8 @@ class OverlayView @JvmOverloads constructor(
         val padL = pad + safeInsets.left
         val padT = tf.imageRect.top + pad + safeInsets.top
 
-        val left = ArrayList<String>(6)
+        val left = ArrayList<String>(7)
+        left.add("MELT GAP v" + com.meltgap.monitor.BuildConfig.VERSION_NAME)
         left.add("CAMERA STREAM: " + if (cameraActive) "ACTIVE" else "OFFLINE")
         left.add("AUTO-CAL: " + if (snapshot.autoCalibrated) "OK" else "NEEDS CHECK")
         left.add("MODE: " + if (mode == Mode.RUN) "RUN" else "CALIBRATION")
