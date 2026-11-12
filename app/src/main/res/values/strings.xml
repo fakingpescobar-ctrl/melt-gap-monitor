@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Melt Gap Monitor</string>
+
+    <string name="mode_run">MODE: RUN</string>
+    <string name="mode_calibrate">MODE: CALIBRATE</string>
+    <string name="auto_cal">AUTO-CAL</string>
+    <string name="reset_zones">RESET ZONES</string>
+    <string name="scale_cal">SCALE</string>
+
+    <string name="camera_permission_title">Camera permission</string>
+    <string name="camera_permission_text">The app needs the camera to detect nozzles and melt jets.</string>
+
+    <string name="scale_dialog_title">Scale calibration</string>
+    <string name="scale_dialog_message">Enter the real length (mm) of a reference segment, then tap its two end points on the image.</string>
+    <string name="scale_dialog_hint">Reference length, mm</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>
