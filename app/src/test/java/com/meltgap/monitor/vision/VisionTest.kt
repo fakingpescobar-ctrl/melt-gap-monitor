@@ -3,6 +3,7 @@ package com.meltgap.monitor.vision
 import com.meltgap.monitor.Zone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -42,7 +43,7 @@ class VisionTest {
     fun nozzleEdgeMissingOnFlatScene() {
         val frame = blank(160, 120, 40)
         val zone = Zone(0.2f, 0.3f, 0.8f, 0.7f)
-        assertEquals(null, Vision.detectNozzleEdge(frame, zone))
+        assertNull(Vision.detectNozzleEdge(frame, zone))
     }
 
     @Test
@@ -62,7 +63,7 @@ class VisionTest {
     fun jetIsMissingOnFlatScene() {
         val frame = blank(160, 120, 30)
         val zone = Zone(0.4f, 0.2f, 0.6f, 0.8f)
-        assertEquals(null, Vision.detectJet(frame, zone, anchorX = 0.5f, halfWidth = 0.1f))
+        assertNull(Vision.detectJet(frame, zone, anchorX = 0.5f, halfWidth = 0.1f))
     }
 
     @Test
@@ -98,8 +99,8 @@ class VisionTest {
 
         assertEquals(255, frame.at(0, 0))
         assertEquals(0, frame.at(1, 0))
-        assertEquals(76, frame.at(2, 0), 2)
-        assertEquals(149, frame.at(3, 0), 2)
+        assertEquals(76, frame.at(2, 0))
+        assertEquals(150, frame.at(3, 0))
         assertEquals(128, frame.at(0, 1))
     }
 
