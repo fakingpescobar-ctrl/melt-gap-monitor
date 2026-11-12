@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -20,20 +20,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub runners ship with the Android SDK preinstalled (ANDROID_HOME).
+      # We only need to accept the licenses so AGP can pull platform/build-tools on demand.
+      - name: Android SDK licenses
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --list_installed | head -20 || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
 
       - name: Build debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
-
-      - name: Build release APK (unsigned)
-        run: gradle --no-daemon assembleRelease
-        continue-on-error: true
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -41,6 +40,10 @@ jobs:
           name: melt-gap-monitor-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Build release APK (unsigned)
+        run: ./gradlew --no-daemon assembleRelease
+        continue-on-error: true
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
