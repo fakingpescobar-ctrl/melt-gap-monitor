@@ -7,6 +7,7 @@
     <string name="auto_cal">AUTO-CAL</string>
     <string name="reset_zones">RESET ZONES</string>
     <string name="scale_cal">SCALE</string>
+    <string name="log">LOG</string>
 
     <string name="camera_permission_title">Camera permission</string>
     <string name="camera_permission_text">The app needs the camera to detect nozzles and melt jets.</string>

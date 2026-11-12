@@ -25,6 +25,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.meltgap.monitor.databinding.ActivityMainBinding
+import com.meltgap.monitor.diag.DiagLog
 import com.meltgap.monitor.ui.OverlayView
 import com.meltgap.monitor.vision.Vision
 import com.meltgap.monitor.vision.VisionEngine
@@ -44,12 +45,16 @@ class MainActivity : AppCompatActivity() {
     private var cameraProvider: ProcessCameraProvider? = null
 
     private var pendingReferenceMm = 0f
+    private var analyzeErrors = 0
+    private var lastAnalyzeErrorAt = 0L
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
+                DiagLog.i("CAM", "camera permission granted")
                 startCamera()
             } else {
+                DiagLog.w("CAM", "camera permission denied")
                 showPermissionRationale()
             }
         }
@@ -62,13 +67,37 @@ class MainActivity : AppCompatActivity() {
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        DiagLog.init(applicationContext)
+        DiagLog.i("APP", "Melt Gap Monitor ${BuildConfig.VERSION_NAME} started")
+
         settings = AppSettings.get(this)
+        DiagLog.i(
+            "APP",
+            String.format(
+                Locale.US,
+                "settings: mmPerWidth=%.2f target=%.1f tol=%.1f autocal=%s nodes=%d",
+                settings.mmPerImageWidth, settings.targetGapMm, settings.toleranceMm,
+                settings.autoCalOk, settings.nodes.size
+            )
+        )
         engine = VisionEngine { settings }
         engine.onAnalyzed = { binding.overlay.postInvalidateOnAnimation() }
 
         binding.overlay.engine = engine
         binding.overlay.settings = settings
-        binding.overlay.onZonesChanged = { settings.save() }
+        binding.overlay.onZonesChanged = {
+            settings.save()
+            DiagLog.i(
+                "UI",
+                "zones saved: " + settings.nodes.joinToString("; ") {
+                    String.format(
+                        Locale.US,
+                        "%s [%.2f..%.2f] axis %.2f",
+                        it.name, it.nozzle.left, it.nozzle.right, it.jetAnchorX
+                    )
+                }
+            )
+        }
         binding.overlay.onScalePicked = { px -> onScalePicked(px) }
 
         applyInsets()
@@ -112,10 +141,12 @@ class MainActivity : AppCompatActivity() {
             } else {
                 getString(R.string.mode_calibrate)
             }
+            DiagLog.i("UI", "mode -> $next")
         }
 
         binding.btnAutoCal.setOnClickListener {
             engine.requestAutoCalibration()
+            DiagLog.i("UI", "auto-calibration requested")
             toast("Auto-calibration requested")
         }
 
@@ -123,10 +154,24 @@ class MainActivity : AppCompatActivity() {
             settings.resetZones()
             engine.resetSmoothing()
             binding.overlay.invalidate()
+            DiagLog.i("UI", "zones reset to defaults")
             toast("Zones reset to default")
         }
 
         binding.btnScale.setOnClickListener { askReferenceLength() }
+
+        binding.btnLog.setOnClickListener {
+            val next = !binding.overlay.showLog
+            binding.overlay.showLog = next
+            binding.btnLog.text = if (next) "LOG ON" else getString(R.string.log)
+            DiagLog.i("UI", "log panel ${if (next) "shown" else "hidden"}")
+        }
+        binding.btnLog.setOnLongClickListener {
+            DiagLog.clear()
+            toast("Log cleared")
+            binding.overlay.invalidate()
+            true
+        }
 
         binding.seekTolerance.setOnSeekBarChangeListener(object :
             android.widget.SeekBar.OnSeekBarChangeListener {
@@ -183,6 +228,14 @@ class MainActivity : AppCompatActivity() {
         settings.mmPerImageWidth = pendingReferenceMm * frameWidth / distancePx
         settings.calibrationSamples += 1
         settings.save()
+        DiagLog.i(
+            "CAL",
+            String.format(
+                Locale.US,
+                "scale: %.4f mm/px, reference %.1f mm over %.1f px (frame %d px)",
+                settings.mmPerPixel(frameWidth), pendingReferenceMm, distancePx, frameWidth
+            )
+        )
         binding.overlay.mode = OverlayView.Mode.CALIBRATE
         binding.btnMode.text = getString(R.string.mode_calibrate)
         toast(
@@ -196,6 +249,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
+        DiagLog.i("CAM", "starting CameraX (preview 4:3, analysis 640x480 RGBA)")
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
@@ -239,13 +293,16 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 binding.overlay.cameraActive = true
+                DiagLog.i("CAM", "camera bound to lifecycle")
                 binding.previewView.post {
                     runCatching {
                         analysis.targetRotation = binding.previewView.display.rotation
+                        DiagLog.i("CAM", "targetRotation=${analysis.targetRotation}")
                     }
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "Camera start failed", t)
+                DiagLog.e("CAM", "start failed", t)
                 binding.overlay.cameraActive = false
                 toast("Camera error: ${t.message}")
             }
@@ -264,7 +321,14 @@ class MainActivity : AppCompatActivity() {
             )
             engine.process(gray, proxy.imageInfo.rotationDegrees)
         } catch (t: Throwable) {
-            Log.w(TAG, "Frame analysis failed", t)
+            // Never spam: first error plus one per 5 seconds.
+            val now = android.os.SystemClock.elapsedRealtime()
+            analyzeErrors++
+            if (analyzeErrors == 1 || now - lastAnalyzeErrorAt > 5000L) {
+                lastAnalyzeErrorAt = now
+                Log.w(TAG, "Frame analysis failed", t)
+                DiagLog.e("VISION", "frame analysis failed (#$analyzeErrors)", t)
+            }
         } finally {
             proxy.close()
         }
@@ -293,6 +357,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        DiagLog.i("APP", "activity destroyed")
         cameraProvider?.unbindAll()
         analysisExecutor.shutdown()
     }

@@ -2,7 +2,9 @@ package com.meltgap.monitor.vision
 
 import android.os.SystemClock
 import com.meltgap.monitor.AppSettings
+import com.meltgap.monitor.diag.DiagLog
 import kotlin.math.abs
+import java.util.Locale
 
 /**
  * Runs per-frame analysis on the camera executor thread and publishes an immutable snapshot
@@ -39,6 +41,8 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
 
     @Volatile
     private var autoCalRequested = false
+
+    private var lastMetricsLogAt = 0L
 
     private val smoothNozzle = floatArrayOf(-1f, -1f)
     private val smoothJet = floatArrayOf(-1f, -1f)
@@ -79,8 +83,16 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
                 settings.autoCalOk = true
                 runCatching { settings.save() }
                 resetSmoothing()
+                DiagLog.i("AUTOCAL", "OK — " + calibrated.joinToString("; ") {
+                    String.format(
+                        Locale.US,
+                        "zone %.2f..%.2f axis %.2f",
+                        it.nozzle.left, it.nozzle.right, it.jetAnchorX
+                    )
+                })
             } else {
                 settings.autoCalOk = false
+                DiagLog.w("AUTOCAL", "FAILED — no strong vertical edges in frame ${frame.width}x${frame.height}")
             }
         }
 
@@ -133,7 +145,54 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
             processingMs = SystemClock.elapsedRealtime() - started,
             autoCalibrated = autoOk
         )
+        logDiagnostics(snapshot!!)
         onAnalyzed?.invoke()
+    }
+
+    private val gapState = ArrayList<Boolean>()
+
+    /**
+     * Low-volume diagnostics: one line per second with the numbers, plus an event line whenever
+     * a node acquires or loses its jet. This is what makes remote debugging possible.
+     */
+    private fun logDiagnostics(snap: Snapshot) {
+        if (gapState.size != snap.nodes.size) {
+            gapState.clear()
+            repeat(snap.nodes.size) { gapState.add(false) }
+        }
+        snap.nodes.forEachIndexed { index, node ->
+            val previous = gapState[index]
+            if (previous != node.hasGap) {
+                gapState[index] = node.hasGap
+                if (node.hasGap) {
+                    DiagLog.i(
+                        "VISION",
+                        String.format(Locale.US, "NODE %d jet ACQUIRED at x=%.0f (conf %.2f)",
+                            index + 1, node.jetX, node.jetConfidence)
+                    )
+                } else {
+                    DiagLog.w("VISION", "NODE ${index + 1} jet LOST")
+                }
+            }
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastMetricsLogAt < 1000L) return
+        lastMetricsLogAt = now
+
+        val text = snap.nodes.mapIndexed { index, node ->
+            String.format(
+                Locale.US,
+                "N%d nozzle=%.0f/%.2f jet=%.0f/%.2f gap=%s",
+                index + 1,
+                node.nozzleX,
+                node.nozzleConfidence,
+                node.jetX,
+                node.jetConfidence,
+                if (node.hasGap) String.format(Locale.US, "%.0fpx %.1fmm", node.gapPx, node.gapMm) else "none"
+            )
+        }.joinToString(" | ")
+        DiagLog.d("VISION", "$text  ${snap.processingMs}ms")
     }
 
     private fun smooth(index: Int, store: FloatArray, raw: Float?): Float {

@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.meltgap.monitor.AppSettings
 import com.meltgap.monitor.Zone
+import com.meltgap.monitor.diag.DiagLog
 import com.meltgap.monitor.vision.FrameTransform
 import com.meltgap.monitor.vision.VisionEngine
 import java.util.Locale
@@ -51,6 +52,13 @@ class OverlayView @JvmOverloads constructor(
         }
 
     var cameraActive: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** Draws the in-app log panel (tap LOG in the control bar). */
+    var showLog: Boolean = false
         set(value) {
             field = value
             invalidate()
@@ -161,6 +169,11 @@ class OverlayView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         setShadowLayer(dp(3f), 0f, 0f, Color.BLACK)
     }
+    private val logPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#B9F6CA")
+        textSize = sp(9f)
+        typeface = Typeface.MONOSPACE
+    }
 
     fun beginScalePicking() {
         scaleA = null
@@ -252,6 +265,37 @@ class OverlayView @JvmOverloads constructor(
         }
 
         if (!cameraActive) drawHint(canvas, "CAMERA OFFLINE")
+
+        if (showLog) drawLogPanel(canvas)
+    }
+
+    private fun drawLogPanel(canvas: Canvas) {
+        val entries = DiagLog.recent(9)
+        if (entries.isEmpty()) return
+        val pad = dp(8f)
+        val lineH = logPaint.textSize * 1.30f
+        val maxW = width * 0.62f
+        val height2 = lineH * entries.size + pad * 2f
+        val bottom = height - dp(76f)
+        val top = (bottom - height2).coerceAtLeast(dp(60f))
+        canvas.drawRect(pad, top, pad + maxW, top + height2, hudBg)
+        var y = top + pad - logPaint.fontMetrics.ascent
+        for (entry in entries) {
+            canvas.drawText(
+                fitText(logPaint, entry.line(), maxW - pad * 2f),
+                pad * 1.5f,
+                y,
+                logPaint
+            )
+            y += lineH
+        }
+    }
+
+    private fun fitText(paint: Paint, text: String, maxWidth: Float): String {
+        if (paint.measureText(text) <= maxWidth) return text
+        var end = text.length
+        while (end > 4 && paint.measureText(text, 0, end) > maxWidth) end--
+        return text.substring(0, end) + "…"
     }
 
     private fun rectFor(tf: FrameTransform, zone: Zone): RectF {
