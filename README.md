@@ -1,5 +1,7 @@
 # Melt Gap Monitor (prototype, no hardware)
 
+[![Build APK](https://github.com/fakingpescobar-ctrl/melt-gap-monitor/actions/workflows/android.yml/badge.svg)](https://github.com/fakingpescobar-ctrl/melt-gap-monitor/actions/workflows/android.yml)
+
 Android-приложение для отработки логики компьютерного зрения и калибровки **без аппаратной части**:
 камера телефона смотрит на сопла и струи расплава, приложение находит их в кадре,
 считает зазор в миллиметрах и показывает эмуляцию команд коррекции.
@@ -72,6 +74,17 @@ CMD: EMULATED (no relays)
 
 В облаке: workflow `.github/workflows/android.yml` собирает APK на каждый push
 и кладёт его в артефакты Actions (`melt-gap-monitor-debug`).
+
+## Установка на телефон
+
+После успешной сборки APK публикуется в Releases (без логина):
+
+```
+https://github.com/fakingpescobar-ctrl/melt-gap-monitor/releases/download/latest/app-debug.apk
+```
+
+Открыть ссылку в браузере телефона → скачать → «Установить из этого источника»
+(Android спросит разрешение для браузера — это нормально для APK вне Play Store).
 
 ## Ограничения прототипа
 
