@@ -72,13 +72,22 @@ class VisionTest {
         frame.fill(60, 100, 210)
         frame.fill(220, 260, 210)
 
-        val nodes = Vision.autoCalibrate(frame)
+        val result = Vision.autoCalibrate(frame)
 
-        assertNotNull(nodes)
-        assertEquals(2, nodes!!.size)
+        assertTrue("auto-cal should succeed: ${result.reason}", result.ok)
+        val nodes = result.nodes!!
+        assertEquals(2, nodes.size)
         assertTrue("left nozzle should stay in the left half", nodes[0].nozzle.left < 0.5f)
         assertTrue("right nozzle should stay in the right half", nodes[1].nozzle.left > 0.5f)
         assertTrue(nodes[0].nozzle.right > nodes[0].nozzle.left)
+    }
+
+    @Test
+    fun autoCalibrationFailsOnFlatScene() {
+        val frame = blank(320, 240, 90)
+        val result = Vision.autoCalibrate(frame)
+        assertEquals(false, result.ok)
+        assertNull(result.nodes)
     }
 
     @Test
