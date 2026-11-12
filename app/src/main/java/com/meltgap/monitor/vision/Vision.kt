@@ -3,6 +3,7 @@ package com.meltgap.monitor.vision
 import com.meltgap.monitor.NodeConfig
 import com.meltgap.monitor.Zone
 import java.nio.ByteBuffer
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -175,66 +176,170 @@ object Vision {
     }
 
     /**
-     * One-shot scene scan: finds the two strongest vertical edges (nozzle candidates) in the
-     * left and right halves of the frame and derives zones + jet anchors from them.
+     * One-shot scene scan.
+     *
+     * Two strategies, in order of reliability on real footage:
+     *  1. bright vertical bands (melt jets) — thin, high-contrast, easy to find;
+     *     the nozzle zone is placed just left of each band, which is where the gap is measured;
+     *  2. strongest vertical luminance edges, used when the scene has no clear bands.
      */
-    fun autoCalibrate(frame: GrayFrame): List<NodeConfig>? {
+    fun autoCalibrate(frame: GrayFrame): AutoCalResult {
         val w = frame.width
         val h = frame.height
-        if (w < 80 || h < 60) return null
+        if (w < 80 || h < 60) {
+            return AutoCalResult(null, "none", "frame too small", "${w}x$h")
+        }
 
-        val y0 = (h * 0.15f).toInt()
-        val y1 = (h * 0.85f).toInt()
-        val rows = y1 - y0
-        if (rows < 10) return null
+        val y0 = (h * 0.12f).toInt().coerceAtLeast(0)
+        val y1 = (h * 0.88f).toInt().coerceAtMost(h - 1)
+        val rows = (y1 - y0).coerceAtLeast(1)
 
         val profile = FloatArray(w)
         for (x in 0 until w) {
             var sum = 0
-            for (y in y0 until y1) sum += frame.at(x, y)
+            for (y in y0..y1) sum += frame.at(x, y)
             profile[x] = sum.toFloat() / rows
         }
+        val smooth = smooth3(profile)
 
-        val smooth = FloatArray(w)
-        for (i in 0 until w) {
-            val a = profile[if (i > 0) i - 1 else 0]
-            val b = profile[i]
-            val c = profile[if (i < w - 1) i + 1 else w - 1]
-            smooth[i] = (a + 2f * b + c) * 0.25f
+        val mean = smooth.average().toFloat()
+        var variance = 0.0
+        for (v in smooth) {
+            val d = (v - mean).toDouble()
+            variance += d * d
+        }
+        val sd = sqrt((variance / smooth.size).toFloat())
+        val details = String.format(
+            Locale.US, "w=%d mean=%.0f sd=%.0f", w, mean, sd
+        )
+
+        // --- 1) jet-centric -------------------------------------------------
+        val threshold = mean + max(6f, 0.6f * sd)
+        val bands = findBrightBands(smooth, threshold, (w * 0.06f).toInt())
+        if (bands.size >= 2) {
+            val left = bands.first()
+            val right = bands.last()
+            if (right - left >= w * 0.06f) {
+                val nodes = listOf(
+                    jetNode(w, "NODE 1", left),
+                    jetNode(w, "NODE 2", right)
+                )
+                return AutoCalResult(
+                    nodes,
+                    "bright bands",
+                    "ok",
+                    "$details bands=${bands.joinToString(",")}"
+                )
+            }
         }
 
+        // --- 2) edge fallback ----------------------------------------------
         val leftEdge = strongestEdge(smooth, (w * 0.03f).toInt(), (w * 0.47f).toInt())
         val rightEdge = strongestEdge(smooth, (w * 0.53f).toInt(), (w * 0.97f).toInt())
-        if (leftEdge < 0 || rightEdge < 0) return null
-        if (rightEdge - leftEdge < w * 0.08f) return null
-
-        val nodes = ArrayList<NodeConfig>(2)
-        for (edge in intArrayOf(leftEdge, rightEdge)) {
-            val bodyBrightness = smooth[(edge + 3).coerceAtMost(w - 1)]
-            val outsideBrightness = smooth[(edge - 3).coerceAtLeast(0)]
-            // Nozzle body extends toward the brighter side of the edge.
-            val dir = if (bodyBrightness >= outsideBrightness) 1 else -1
-            val bodyFrom = (edge + dir * 2).coerceIn(0, w - 1)
-            val bodyTo = (edge + dir * (w * 0.10f).toInt()).coerceIn(0, w - 1)
-            val l = minOf(bodyFrom, bodyTo).toFloat() / w
-            val r = maxOf(bodyFrom, bodyTo).toFloat() / w
-            val anchor = (edge + dir * (w * 0.06f).toInt()).toFloat() / w
-
-            nodes.add(
-                NodeConfig(
-                    name = "NODE ${nodes.size + 1}",
-                    nozzle = Zone(
-                        left = l.coerceIn(0f, 0.95f),
-                        top = 0.22f,
-                        right = (r.coerceAtLeast(l + 0.04f)).coerceIn(0.05f, 1f),
-                        bottom = 0.78f
-                    ),
-                    jetAnchorX = anchor.coerceIn(0.01f, 0.99f),
-                    jetHalfWidth = 0.06f
-                )
+        if (leftEdge < 0 || rightEdge < 0) {
+            return AutoCalResult(
+                null,
+                "none",
+                "no vertical structures (bands=${bands.size})",
+                details
             )
         }
-        return nodes
+        if (rightEdge - leftEdge < w * 0.06f) {
+            return AutoCalResult(null, "none", "structures too close", details)
+        }
+        val nodes = listOf(
+            edgeNode(w, "NODE 1", leftEdge, smooth),
+            edgeNode(w, "NODE 2", rightEdge, smooth)
+        )
+        return AutoCalResult(
+            nodes,
+            "vertical edges",
+            "ok",
+            "$details left=$leftEdge right=$rightEdge"
+        )
+    }
+
+    private fun smooth3(src: FloatArray): FloatArray {
+        val out = FloatArray(src.size)
+        for (i in src.indices) {
+            val a = src[if (i > 0) i - 1 else 0]
+            val b = src[i]
+            val c = src[if (i < src.size - 1) i + 1 else src.size - 1]
+            out[i] = (a + 2f * b + c) * 0.25f
+        }
+        return out
+    }
+
+    /** Local maxima of the column profile above [threshold], strongest first, min separation. */
+    private fun findBrightBands(profile: FloatArray, threshold: Float, minSeparation: Int): List<Int> {
+        val peaks = ArrayList<Pair<Int, Float>>()
+        for (i in 1 until profile.size - 1) {
+            if (profile[i] > threshold &&
+                profile[i] >= profile[i - 1] &&
+                profile[i] > profile[i + 1]
+            ) {
+                peaks.add(Pair(i, profile[i]))
+            }
+        }
+        if (peaks.isEmpty()) return emptyList()
+
+        val sep = minSeparation.coerceAtLeast(6)
+        val chosen = ArrayList<Int>()
+        for (peak in peaks.sortedByDescending { it.second }) {
+            if (chosen.none { abs(it - peak.first) < sep }) chosen.add(peak.first)
+            if (chosen.size >= 4) break
+        }
+        return chosen.sorted()
+    }
+
+    /** Zone sits left of the jet, jet axis on the band. */
+    private fun jetNode(w: Int, name: String, jetX: Int): NodeConfig {
+        val left = (jetX - w * 0.12f).coerceAtLeast(0f)
+        val right = (jetX - w * 0.01f).coerceAtLeast(left + w * 0.03f)
+        return NodeConfig(
+            name = name,
+            nozzle = Zone(
+                left = (left / w).coerceIn(0f, 0.94f),
+                top = 0.25f,
+                right = (right / w).coerceIn(0.06f, 1f),
+                bottom = 0.75f
+            ),
+            jetAnchorX = (jetX.toFloat() / w).coerceIn(0.01f, 0.99f),
+            jetHalfWidth = 0.05f
+        )
+    }
+
+    /** Zone grows from the edge toward the brighter side (nozzle body). */
+    private fun edgeNode(w: Int, name: String, edge: Int, profile: FloatArray): NodeConfig {
+        val bodyBrightness = profile[(edge + 3).coerceAtMost(w - 1)]
+        val outsideBrightness = profile[(edge - 3).coerceAtLeast(0)]
+        val dir = if (bodyBrightness >= outsideBrightness) 1 else -1
+
+        val from = (edge + dir * 2).coerceIn(0, w - 1)
+        val to = (edge + dir * (w * 0.10f).toInt()).coerceIn(0, w - 1)
+        val left = minOf(from, to).toFloat() / w
+        val right = maxOf(maxOf(from, to).toFloat() / w, left + 0.03f)
+
+        return NodeConfig(
+            name = name,
+            nozzle = Zone(
+                left = left.coerceIn(0f, 0.94f),
+                top = 0.25f,
+                right = right.coerceIn(0.06f, 1f),
+                bottom = 0.75f
+            ),
+            jetAnchorX = ((edge + dir * (w * 0.06f)).toFloat() / w).coerceIn(0.01f, 0.99f),
+            jetHalfWidth = 0.05f
+        )
+    }
+
+    data class AutoCalResult(
+        val nodes: List<NodeConfig>?,
+        val method: String,
+        val reason: String,
+        val details: String
+    ) {
+        val ok: Boolean get() = nodes != null && nodes.size == 2
     }
 
     private fun strongestEdge(smoothed: FloatArray, from: Int, to: Int): Int {
@@ -248,7 +353,7 @@ object Vision {
                 best = i
             }
         }
-        return if (bestVal >= 8f) best else -1
+        return if (bestVal >= 6f) best else -1
     }
 
     /** Helpers used by diagnostics only. */

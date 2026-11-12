@@ -48,6 +48,10 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
 
     private var lastMetricsLogAt = 0L
 
+    /** Human-readable result of the last auto-calibration attempt (shown as a toast). */
+    @Volatile
+    var lastAutoCalMessage: String = ""
+
     private val smoothNozzle = floatArrayOf(-1f, -1f)
     private val smoothJet = floatArrayOf(-1f, -1f)
     private var smoothedRotation = -1
@@ -75,34 +79,38 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
 
         if (autoCalRequested) {
             autoCalRequested = false
-            val calibrated = runCatching { Vision.autoCalibrate(frame) }.getOrNull()
-            if (calibrated != null && calibrated.size == settings.nodes.size) {
+            val result = runCatching { Vision.autoCalibrate(frame) }.getOrElse { error ->
+                Vision.AutoCalResult(
+                    null,
+                    "none",
+                    "exception: ${error.javaClass.simpleName}",
+                    ""
+                )
+            }
+            val found = result.nodes
+            if (result.ok && found != null && found.size == settings.nodes.size) {
                 synchronized(settings.nodes) {
                     for (i in settings.nodes.indices) {
-                        settings.nodes[i].nozzle = calibrated[i].nozzle
-                        settings.nodes[i].jetAnchorX = calibrated[i].jetAnchorX
-                        settings.nodes[i].jetHalfWidth = calibrated[i].jetHalfWidth
+                        settings.nodes[i].nozzle = found[i].nozzle
+                        settings.nodes[i].jetAnchorX = found[i].jetAnchorX
+                        settings.nodes[i].jetHalfWidth = found[i].jetHalfWidth
                     }
                 }
                 settings.autoCalOk = true
+                lastAutoCalMessage = "Auto-cal OK (${result.method})"
                 runCatching { settings.save() }
-                resetSmoothing()
-                DiagLog.i("AUTOCAL", "OK — " + calibrated.joinToString("; ") {
-                    String.format(
-                        Locale.US,
-                        "zone %.2f..%.2f axis %.2f",
-                        it.nozzle.left, it.nozzle.right, it.jetAnchorX
-                    )
-                })
+                DiagLog.i("AUTOCAL", "${result.method}: ${result.details}")
             } else {
                 settings.autoCalOk = false
-                DiagLog.w("AUTOCAL", "FAILED — no strong vertical edges in frame ${frame.width}x${frame.height}")
+                lastAutoCalMessage = "Auto-cal failed: ${result.reason}"
+                DiagLog.w("AUTOCAL", "${result.reason} | ${result.details}")
             }
+            resetSmoothing()
         }
 
         val nodes = synchronized(settings.nodes) { settings.nodes.map { it } }
         val results = ArrayList<NodeResult>(nodes.size)
-        var autoOk = settings.autoCalOk
+        val autoOk = settings.autoCalOk
         val mmPerWidth = settings.effectiveMmPerImageWidth(zoomRatio)
 
         synchronized(smoothNozzle) {
@@ -126,7 +134,9 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
                     gapPx * mmPerWidth / frame.width
                 } else 0f
 
-                if (nozzle == null && jet == null) autoOk = false
+                if (nozzle == null && jet == null) {
+                    // nothing: tracking quality is reported per node in the HUD
+                }
 
                 results.add(
                     NodeResult(

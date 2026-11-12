@@ -156,7 +156,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnAutoCal.setOnClickListener {
             engine.requestAutoCalibration()
             DiagLog.i("UI", "auto-calibration requested")
-            toast("Auto-calibration requested")
+            binding.root.postDelayed({
+                val message = engine.lastAutoCalMessage
+                if (message.isNotEmpty()) toast(message)
+            }, 700)
         }
 
         binding.btnReset.setOnClickListener {

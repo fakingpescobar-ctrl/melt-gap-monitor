@@ -418,7 +418,9 @@ class OverlayView @JvmOverloads constructor(
         val left = ArrayList<String>(7)
         left.add("MELT GAP v" + com.meltgap.monitor.BuildConfig.VERSION_NAME)
         left.add("CAMERA STREAM: " + if (cameraActive) "ACTIVE" else "OFFLINE")
-        left.add("AUTO-CAL: " + if (snapshot.autoCalibrated) "OK" else "NEEDS CHECK")
+        left.add("AUTO-CAL: " + if (snapshot.autoCalibrated) "OK" else "FAILED")
+        val tracked = snapshot.nodes.count { it.hasGap }
+        left.add("TRACK: $tracked/${snapshot.nodes.size} NODES")
         left.add("MODE: " + if (mode == Mode.RUN) "RUN" else "CALIBRATION")
         val zoom = engine?.zoomRatio ?: 1f
         val effectiveWidthMm = settings.effectiveMmPerImageWidth(zoom)
