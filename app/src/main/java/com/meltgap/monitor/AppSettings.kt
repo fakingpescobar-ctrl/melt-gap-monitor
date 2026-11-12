@@ -56,6 +56,8 @@ class AppSettings private constructor(private val context: Context) {
     var nodes: MutableList<NodeConfig> = defaultNodes()
     /** Real width of the whole camera frame in mm. 0 = not calibrated yet. */
     var mmPerImageWidth: Float = 0f
+    /** Zoom ratio that was active during scale calibration (mm/px depends on it). */
+    var calibrationZoom: Float = 1f
     var targetGapMm: Float = 5.0f
     var toleranceMm: Float = 0.6f
     var autoCalOk: Boolean = false
@@ -70,11 +72,23 @@ class AppSettings private constructor(private val context: Context) {
     fun mmPerPixel(frameWidth: Int): Float =
         if (mmPerImageWidth <= 0f || frameWidth <= 0) 0f else mmPerImageWidth / frameWidth
 
+    /**
+     * Real width of the frame in mm at the current zoom. Calibration is done at one zoom level,
+     * but the field of view shrinks as the user zooms in, so the mm scale follows the ratio.
+     */
+    fun effectiveMmPerImageWidth(currentZoom: Float): Float {
+        if (mmPerImageWidth <= 0f) return 0f
+        val calZoom = if (calibrationZoom > 0f) calibrationZoom else 1f
+        val zoom = if (currentZoom > 0f) currentZoom else 1f
+        return mmPerImageWidth * calZoom / zoom
+    }
+
     fun isScaleCalibrated(): Boolean = mmPerImageWidth > 0f
 
     fun save() {
         val root = JSONObject()
         root.put("mmPerImageWidth", mmPerImageWidth.toDouble())
+        root.put("calibrationZoom", calibrationZoom.toDouble())
         root.put("targetGapMm", targetGapMm.toDouble())
         root.put("toleranceMm", toleranceMm.toDouble())
         root.put("autoCalOk", autoCalOk)
@@ -103,6 +117,7 @@ class AppSettings private constructor(private val context: Context) {
         runCatching {
             val root = JSONObject(raw)
             mmPerImageWidth = root.optDouble("mmPerImageWidth", 0.0).toFloat()
+            calibrationZoom = root.optDouble("calibrationZoom", 1.0).toFloat()
             targetGapMm = root.optDouble("targetGapMm", 5.0).toFloat()
             toleranceMm = root.optDouble("toleranceMm", 0.6).toFloat()
             autoCalOk = root.optBoolean("autoCalOk", false)

@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.Camera
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -47,6 +48,11 @@ class MainActivity : AppCompatActivity() {
     private var pendingReferenceMm = 0f
     private var analyzeErrors = 0
     private var lastAnalyzeErrorAt = 0L
+
+    private var camera: Camera? = null
+    private var zoomRatio = 1f
+    private var minZoom = 1f
+    private var maxZoom = 1f
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -160,6 +166,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnScale.setOnClickListener { askReferenceLength() }
 
+        binding.btnZoomIn.setOnClickListener { applyZoom(zoomRatio * 1.5f) }
+        binding.btnZoomOut.setOnClickListener { applyZoom(zoomRatio / 1.5f) }
+        binding.overlay.onPinchZoom = { factor -> applyZoom(zoomRatio * factor) }
+
         binding.btnLog.setOnClickListener {
             val next = !binding.overlay.showLog
             binding.overlay.showLog = next
@@ -218,6 +228,21 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun applyZoom(target: Float) {
+        val cam = camera ?: return
+        val clamped = target.coerceIn(minZoom, maxZoom)
+        if (kotlin.math.abs(clamped - zoomRatio) < 0.01f) return
+        val future = cam.cameraControl.setZoomRatio(clamped)
+        future.addListener({
+            runCatching { future.get() }
+                .onFailure { DiagLog.e("ZOOM", "setZoomRatio failed", it) }
+        }, ContextCompat.getMainExecutor(this))
+        DiagLog.i(
+            "ZOOM",
+            String.format(Locale.US, "-> %.2fx (range %.1f..%.1f)", clamped, minZoom, maxZoom)
+        )
+    }
+
     private fun onScalePicked(distancePx: Float) {
         val frameWidth = engine.snapshot?.frameW ?: 0
         if (distancePx <= 1f || frameWidth <= 0) {
@@ -226,14 +251,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         settings.mmPerImageWidth = pendingReferenceMm * frameWidth / distancePx
+        settings.calibrationZoom = zoomRatio
         settings.calibrationSamples += 1
         settings.save()
         DiagLog.i(
             "CAL",
             String.format(
                 Locale.US,
-                "scale: %.4f mm/px, reference %.1f mm over %.1f px (frame %d px)",
-                settings.mmPerPixel(frameWidth), pendingReferenceMm, distancePx, frameWidth
+                "scale: %.4f mm/px at zoom %.2fx, reference %.1f mm over %.1f px (frame %d px)",
+                settings.mmPerPixel(frameWidth), zoomRatio, pendingReferenceMm, distancePx, frameWidth
             )
         )
         binding.overlay.mode = OverlayView.Mode.CALIBRATE
@@ -285,15 +311,36 @@ class MainActivity : AppCompatActivity() {
                 analysis.setAnalyzer(analysisExecutor) { proxy -> analyzeFrame(proxy) }
 
                 provider.unbindAll()
-                provider.bindToLifecycle(
+                val boundCamera = provider.bindToLifecycle(
                     this,
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
                     analysis
                 )
+                camera = boundCamera
+
+                boundCamera.cameraInfo.zoomState.observe(this) { state ->
+                    val previous = engine.zoomRatio
+                    zoomRatio = state.zoomRatio
+                    minZoom = state.minZoomRatio
+                    maxZoom = state.maxZoomRatio
+                    engine.zoomRatio = state.zoomRatio
+                    if (kotlin.math.abs(previous - state.zoomRatio) > 0.01f) {
+                        engine.resetSmoothing()
+                    }
+                    binding.overlay.postInvalidateOnAnimation()
+                }
 
                 binding.overlay.cameraActive = true
-                DiagLog.i("CAM", "camera bound to lifecycle")
+                DiagLog.i(
+                    "CAM",
+                    String.format(
+                        Locale.US,
+                        "camera bound; zoom range %.1f..%.1fx",
+                        boundCamera.cameraInfo.zoomState.value?.minZoomRatio ?: 1f,
+                        boundCamera.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+                    )
+                )
                 binding.previewView.post {
                     runCatching {
                         analysis.targetRotation = binding.previewView.display.rotation

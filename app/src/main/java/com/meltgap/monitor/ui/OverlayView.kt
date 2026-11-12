@@ -10,6 +10,7 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import com.meltgap.monitor.AppSettings
 import com.meltgap.monitor.Zone
@@ -63,6 +64,19 @@ class OverlayView @JvmOverloads constructor(
             field = value
             invalidate()
         }
+
+    /** Called with a relative pinch factor (1.01 = slightly zoomed in). */
+    var onPinchZoom: ((Float) -> Unit)? = null
+
+    private val scaleDetector = ScaleGestureDetector(
+        context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                onPinchZoom?.invoke(detector.scaleFactor)
+                return true
+            }
+        }
+    )
 
     /** Called when the user finished editing zones so the activity can persist them. */
     var onZonesChanged: (() -> Unit)? = null
@@ -394,20 +408,24 @@ class OverlayView @JvmOverloads constructor(
         left.add("CAMERA STREAM: " + if (cameraActive) "ACTIVE" else "OFFLINE")
         left.add("AUTO-CAL: " + if (snapshot.autoCalibrated) "OK" else "NEEDS CHECK")
         left.add("MODE: " + if (mode == Mode.RUN) "RUN" else "CALIBRATION")
+        val zoom = engine?.zoomRatio ?: 1f
+        val effectiveWidthMm = settings.effectiveMmPerImageWidth(zoom)
+
         left.add(
-            if (settings.isScaleCalibrated())
+            if (effectiveWidthMm > 0f)
                 String.format(
                     Locale.US,
                     "SCALE: %.3f mm/px • VIEW %.1f mm",
-                    settings.mmPerPixel(snapshot.frameW),
-                    settings.mmPerImageWidth
+                    effectiveWidthMm / snapshot.frameW,
+                    effectiveWidthMm
                 )
             else "SCALE: NOT SET (press SCALE)"
         )
         left.add(
             String.format(
                 Locale.US,
-                "ENGINE: %d ms/frame • %dx%d",
+                "ZOOM: %.1fx • ENGINE: %d ms • %dx%d",
+                zoom,
                 snapshot.processingMs,
                 snapshot.frameW,
                 snapshot.frameH
@@ -485,8 +503,16 @@ class OverlayView @JvmOverloads constructor(
     // ------------------------------------------------------------------ touch
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val settings = this.settings ?: return false
-        val snapshot = engine?.snapshot ?: return false
+        scaleDetector.onTouchEvent(event)
+        if (scaleDetector.isInProgress) {
+            // A second finger is down: pinch-to-zoom wins over zone dragging.
+            draggingNode = -1
+            dragKind = DragKind.NONE
+            return true
+        }
+
+        val settings = this.settings ?: return true
+        val snapshot = engine?.snapshot ?: return true
         val tf = FrameTransform(
             snapshot.frameW,
             snapshot.frameH,
@@ -503,7 +529,7 @@ class OverlayView @JvmOverloads constructor(
                 return true
             }
             Mode.CALIBRATE -> return handleCalibrationTouch(tf, settings, event)
-            Mode.RUN -> return false
+            Mode.RUN -> return true
         }
     }
 

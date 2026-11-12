@@ -14,6 +14,7 @@ Android-приложение для отработки логики компью
 |---|---|---|
 | 2.1 Захват камеры в реальном времени | готово | `MainActivity.startCamera()` (CameraX 1.4) |
 | 2.1 Работа в ландшафте | готово | `AndroidManifest` → `sensorLandscape` |
+| 2.1 Зум: pinch + кнопки −/+ | готово | `ZoomGesture` в `OverlayView` + `CameraControl.setZoomRatio` |
 | 2.2 Ручная калибровка ROI | готово | `OverlayView` (drag / resize / ось струи) |
 | 2.2 RESET ZONES | готово | `btnReset` → `AppSettings.resetZones()` |
 | 2.2 Авто-калибровка по контрасту | готово | `Vision.autoCalibrate()` + `AUTO-CAL` |

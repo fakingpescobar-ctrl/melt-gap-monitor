@@ -42,6 +42,10 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
     @Volatile
     private var autoCalRequested = false
 
+    /** Current camera zoom ratio; updated by the activity, used to rescale mm per frame width. */
+    @Volatile
+    var zoomRatio: Float = 1f
+
     private var lastMetricsLogAt = 0L
 
     private val smoothNozzle = floatArrayOf(-1f, -1f)
@@ -99,6 +103,7 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
         val nodes = synchronized(settings.nodes) { settings.nodes.map { it } }
         val results = ArrayList<NodeResult>(nodes.size)
         var autoOk = settings.autoCalOk
+        val mmPerWidth = settings.effectiveMmPerImageWidth(zoomRatio)
 
         synchronized(smoothNozzle) {
             for (i in nodes.indices) {
@@ -117,8 +122,8 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
                     gapPx = abs(jetX - nozzleX)
                     hasGap = gapPx > 0.5f
                 }
-                val gapMm = if (hasGap && settings.mmPerImageWidth > 0f) {
-                    gapPx * settings.mmPerImageWidth / frame.width
+                val gapMm = if (hasGap && mmPerWidth > 0f) {
+                    gapPx * mmPerWidth / frame.width
                 } else 0f
 
                 if (nozzle == null && jet == null) autoOk = false
@@ -192,7 +197,7 @@ class VisionEngine(private val settingsProvider: () -> AppSettings) {
                 if (node.hasGap) String.format(Locale.US, "%.0fpx %.1fmm", node.gapPx, node.gapMm) else "none"
             )
         }.joinToString(" | ")
-        DiagLog.d("VISION", "$text  ${snap.processingMs}ms")
+        DiagLog.d("VISION", "$text  ${snap.processingMs}ms  zoom=%.1fx".format(Locale.US, zoomRatio))
     }
 
     private fun smooth(index: Int, store: FloatArray, raw: Float?): Float {
