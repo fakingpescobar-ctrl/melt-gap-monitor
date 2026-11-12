@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyInsets() {
-        val basePadding = dp(6f)
+        val basePadding = dp(6f).toInt()
         ViewCompat.setOnApplyWindowInsetsListener(binding.panel) { view, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
