@@ -68,6 +68,9 @@ class OverlayView @JvmOverloads constructor(
     /** Called with a relative pinch factor (1.01 = slightly zoomed in). */
     var onPinchZoom: ((Float) -> Unit)? = null
 
+    /** System bars / cutout insets in pixels, so the HUD never hides under the status bar. */
+    var safeInsets: android.graphics.Rect = android.graphics.Rect()
+
     private val scaleDetector = ScaleGestureDetector(
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -290,14 +293,20 @@ class OverlayView @JvmOverloads constructor(
         val lineH = logPaint.textSize * 1.30f
         val maxW = width * 0.62f
         val height2 = lineH * entries.size + pad * 2f
-        val bottom = height - dp(76f)
-        val top = (bottom - height2).coerceAtLeast(dp(60f))
-        canvas.drawRect(pad, top, pad + maxW, top + height2, hudBg)
+        val bottom = height - dp(76f) - safeInsets.bottom
+        val top = (bottom - height2).coerceAtLeast(dp(60f) + safeInsets.top)
+        canvas.drawRect(
+            pad + safeInsets.left,
+            top,
+            pad + safeInsets.left + maxW,
+            top + height2,
+            hudBg
+        )
         var y = top + pad - logPaint.fontMetrics.ascent
         for (entry in entries) {
             canvas.drawText(
                 fitText(logPaint, entry.line(), maxW - pad * 2f),
-                pad * 1.5f,
+                pad * 1.5f + safeInsets.left,
                 y,
                 logPaint
             )
@@ -403,6 +412,8 @@ class OverlayView @JvmOverloads constructor(
     ) {
         val pad = dp(10f)
         val lineH = hudText.textSize * 1.35f
+        val padL = pad + safeInsets.left
+        val padT = tf.imageRect.top + pad + safeInsets.top
 
         val left = ArrayList<String>(6)
         left.add("CAMERA STREAM: " + if (cameraActive) "ACTIVE" else "OFFLINE")
@@ -471,15 +482,15 @@ class OverlayView @JvmOverloads constructor(
         val rightW = right.maxOf { hudText.measureText(it) } + pad * 2
         val rightH = lineH * right.size + pad * 1.2f
 
-        val top = tf.imageRect.top + pad
-        canvas.drawRect(pad, top, pad + leftW, top + leftH, hudBg)
+        val top = padT
+        canvas.drawRect(padL, top, padL + leftW, top + leftH, hudBg)
         var y = top + pad * 0.6f - hudText.fontMetrics.ascent
         for (line in left) {
-            canvas.drawText(line, pad * 1.6f, y, hudText)
+            canvas.drawText(line, padL + pad * 0.6f, y, hudText)
             y += lineH
         }
 
-        val rx = width - pad - rightW
+        val rx = width - pad - safeInsets.right - rightW
         canvas.drawRect(rx, top, rx + rightW, top + rightH, hudBg)
         var ry = top + pad * 0.6f - hudText.fontMetrics.ascent
         for ((index, line) in right.withIndex()) {

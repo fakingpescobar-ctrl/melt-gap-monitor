@@ -124,6 +124,9 @@ class MainActivity : AppCompatActivity() {
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
+            binding.overlay.safeInsets = android.graphics.Rect(
+                bars.left, bars.top, bars.right, bars.bottom
+            )
             view.setPadding(
                 view.paddingLeft + bars.left,
                 view.paddingTop,
